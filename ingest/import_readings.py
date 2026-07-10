@@ -41,6 +41,27 @@ from src.master import load_master  # noqa: E402
 BATCH = 500
 
 
+def clean(records: list[dict]) -> list[dict]:
+    """Make records JSON-safe: NaN/NaT/inf -> None, numpy types -> python."""
+    out = []
+    for rec in records:
+        fixed = {}
+        for k, v in rec.items():
+            if v is None:
+                fixed[k] = None
+            elif isinstance(v, float) and (v != v or v in (float("inf"), float("-inf"))):
+                fixed[k] = None
+            elif hasattr(v, "item"):  # numpy scalar
+                v = v.item()
+                fixed[k] = None if (isinstance(v, float) and v != v) else v
+            elif pd.isna(v):
+                fixed[k] = None
+            else:
+                fixed[k] = v
+        out.append(fixed)
+    return out
+
+
 def env(name: str, default: str | None = None) -> str:
     val = os.environ.get(name, default)
     if val is None:
@@ -125,8 +146,11 @@ def main() -> None:
     sb = create_client(env("SUPABASE_URL"), env("SUPABASE_SERVICE_KEY"))
 
     # 1. Sync meter register from the repo's master sheet
+    print("[stage] syncing meter register from master sheet ...")
     master = load_master()
-    meter_rows = master.assign(updated_at=datetime.now(timezone.utc).isoformat()).to_dict("records")
+    meter_rows = clean(
+        master.assign(updated_at=datetime.now(timezone.utc).isoformat()).to_dict("records")
+    )
     for i in range(0, len(meter_rows), BATCH):
         sb.table("meters").upsert(meter_rows[i : i + BATCH], on_conflict="serial").execute()
     print(f"Synced {len(meter_rows)} meters from master sheet.")
@@ -139,6 +163,7 @@ def main() -> None:
     sftp_dir = env("SFTP_DIR")
 
     transport = paramiko.Transport((host, port))
+    print(f"[stage] connecting to SFTP {host}:{port} ...")
     transport.connect(username=env("SFTP_USERNAME"), password=env("SFTP_PASSWORD"))
     sftp = paramiko.SFTPClient.from_transport(transport)
     sftp.chdir(sftp_dir)
@@ -157,9 +182,11 @@ def main() -> None:
 
     for fname in sorted(new_files):
         try:
+            print(f"[stage] importing {fname} ...")
             with sftp.open(fname, "rb") as fh:
                 content = fh.read()
             rows, rows_in_file = parse_csv(content, fname)
+            rows = clean(rows)
 
             inserted = 0
             for i in range(0, len(rows), BATCH):
