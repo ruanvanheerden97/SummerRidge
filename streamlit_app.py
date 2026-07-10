@@ -1,7 +1,7 @@
 """Summer Ridge Smart Metering — Streamlit entry point."""
 import streamlit as st
 
-from src.branding import inject_css
+from src.branding import init_mobile_state, inject_css
 
 st.set_page_config(
     page_title="Summer Ridge · Smart Metering",
@@ -9,6 +9,7 @@ st.set_page_config(
     layout="wide",
 )
 
+init_mobile_state()  # auto-detects Android/iPhone from the browser on first load
 inject_css()
 
 pages = st.navigation(
@@ -21,6 +22,11 @@ pages = st.navigation(
 
 with st.sidebar:
     st.image("assets/summer_ridge_logo.jpg", width='stretch')
+    st.toggle(
+        "📱 Mobile layout",
+        key="mobile_layout",
+        help="Detected automatically on phones — switch manually any time.",
+    )
     st.markdown("---")
 
 pages.run()

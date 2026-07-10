@@ -2,22 +2,51 @@
 import pandas as pd
 import streamlit as st
 
-from src.branding import page_header, utility_label
+from src.branding import metric_row, page_header, utility_label
 from src.charts import history_chart
-from src.data import display_unit, get_master, get_meter_history
+from src.data import display_unit, get_latest_readings, get_master, get_meter_history
 
 page_header("Stand History")
 
 master = get_master()
+latest = get_latest_readings()
+serials_with_data = (
+    set(latest["meter_serial"].astype(str)) if not latest.empty else set()
+)
 
-stands = sorted(master["stand"].unique())
-stand = st.selectbox("Select a stand / unit", stands, index=None, placeholder="Type to search, e.g. FL01/111")
+only_with_data = st.toggle(
+    "Only show stands with imported readings",
+    value=True,
+    help="Switch off to browse every stand in the register, including those without AMR data yet.",
+)
+
+if only_with_data:
+    stand_pool = master[master["serial"].isin(serials_with_data)]["stand"].unique()
+else:
+    stand_pool = master["stand"].unique()
+
+stands = sorted(stand_pool)
+if not stands:
+    st.info("No readings have been imported yet — check the Live AMR Readings page.")
+    st.stop()
+
+stand = st.selectbox(
+    "Select a stand / unit",
+    stands,
+    index=None,
+    placeholder="Type to search, e.g. FL01/111",
+)
 
 if not stand:
-    st.info("Pick a stand above to see every meter linked to it and its full reading history.")
+    st.info(
+        f"{len(stands)} stand(s) available. Pick one above to see its meters "
+        "and full reading history."
+    )
     st.stop()
 
 meters = master[master["stand"] == stand].sort_values(["utility", "serial"])
+meters_with_data = meters[meters["serial"].isin(serials_with_data)]
+meters_without = meters[~meters["serial"].isin(serials_with_data)]
 
 st.subheader(f"Meters on {stand}")
 if len(meters) > 1:
@@ -40,28 +69,33 @@ st.dataframe(
     hide_index=True,
 )
 
-for _, m in meters.iterrows():
+if not meters_without.empty:
+    names = ", ".join(
+        f"{utility_label(r['utility'])} {r['serial']}" for _, r in meters_without.iterrows()
+    )
+    st.caption(f"No imported readings yet for: {names}.")
+
+for _, m in meters_with_data.iterrows():
     unit = display_unit(m["utility"])
     st.markdown(f"### {utility_label(m['utility'])} meter — {m['serial']}")
 
-    if not m["amr_active"]:
-        st.info("AMR not yet installed on this meter — no automatic readings available.")
-        continue
-
     hist = get_meter_history(m["serial"])
     if hist.empty:
-        st.warning("AMR installed but no readings received yet.")
+        st.warning("No readings received yet.")
         continue
 
     div = 1000.0 if m["utility"] == "gas" else 1.0
     first, last = hist.iloc[0], hist.iloc[-1]
     total = (last["reading_value"] - first["reading_value"]) / div
 
-    k1, k2, k3, k4 = st.columns(4)
-    k1.metric("Readings on record", len(hist))
-    k2.metric("Latest index", f"{last['reading_value'] / div:,.3f} {unit}")
-    k3.metric("Latest reading at", last["reading_ts"].strftime("%Y-%m-%d %H:%M"))
-    k4.metric("Consumption over history", f"{total:,.3f} {unit}")
+    metric_row(
+        [
+            ("Readings on record", len(hist)),
+            ("Latest index", f"{last['reading_value'] / div:,.3f} {unit}"),
+            ("Latest reading at", last["reading_ts"].strftime("%Y-%m-%d %H:%M")),
+            ("Consumption over history", f"{total:,.3f} {unit}"),
+        ]
+    )
 
     st.plotly_chart(
         history_chart(hist, m["serial"], m["utility"], unit),

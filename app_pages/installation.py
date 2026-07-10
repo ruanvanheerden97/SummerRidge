@@ -2,7 +2,7 @@
 import pandas as pd
 import streamlit as st
 
-from src.branding import ELEC_COLOR, GAS_COLOR, page_header
+from src.branding import ELEC_COLOR, GAS_COLOR, is_mobile, metric_row, page_header, side_by_side
 from src.charts import donut, installation_by_floor
 from src.data import get_master
 from src.master import FLOOR_ORDER
@@ -14,45 +14,50 @@ elec = master[master["utility"] == "elec"]
 gas = master[master["utility"] == "gas"]
 
 # ---------------------------------------------------------------- KPIs
-c1, c2, c3, c4 = st.columns(4)
-c1.metric("Electricity meters with AMR", f"{int(elec['amr_active'].sum())} / {len(elec)}")
-c2.metric("Electricity outstanding", int((~elec["amr_active"]).sum()))
-c3.metric("Gas meters with AMR", f"{int(gas['amr_active'].sum())} / {len(gas)}")
-c4.metric("Gas outstanding", int((~gas["amr_active"]).sum()))
+metric_row(
+    [
+        ("Electricity meters with AMR", f"{int(elec['amr_active'].sum())} / {len(elec)}"),
+        ("Electricity outstanding", int((~elec["amr_active"]).sum())),
+        ("Gas meters with AMR", f"{int(gas['amr_active'].sum())} / {len(gas)}"),
+        ("Gas outstanding", int((~gas["amr_active"]).sum())),
+    ]
+)
 
-d1, d2 = st.columns(2)
-with d1:
-    st.plotly_chart(
+side_by_side(
+    lambda: st.plotly_chart(
         donut(int(elec["amr_active"].sum()), len(elec), "Electricity", ELEC_COLOR),
         width='stretch',
-    )
-with d2:
-    st.plotly_chart(
+    ),
+    lambda: st.plotly_chart(
         donut(int(gas["amr_active"].sum()), len(gas), "Gas", GAS_COLOR),
         width='stretch',
-    )
+    ),
+)
 
 # ---------------------------------------------------------------- per floor
 st.subheader("Progress per floor")
-f1, f2 = st.columns(2)
-with f1:
-    st.plotly_chart(
+side_by_side(
+    lambda: st.plotly_chart(
         installation_by_floor(master, "elec", "Electricity — AMR per floor"),
         width='stretch',
-    )
-with f2:
-    st.plotly_chart(
+    ),
+    lambda: st.plotly_chart(
         installation_by_floor(master, "gas", "Gas — AMR per floor"),
         width='stretch',
-    )
+    ),
+)
 
 # ---------------------------------------------------------------- outstanding list
 st.subheader("Outstanding installations")
-fc1, fc2 = st.columns([1, 1])
-util_choice = fc1.radio(
-    "Utility", ["Both", "Electricity", "Gas"], horizontal=True, key="inst_util"
-)
-floor_choice = fc2.multiselect("Floor", FLOOR_ORDER, default=[], placeholder="All floors")
+if is_mobile():
+    util_choice = st.radio("Utility", ["Both", "Electricity", "Gas"], horizontal=True, key="inst_util")
+    floor_choice = st.multiselect("Floor", FLOOR_ORDER, default=[], placeholder="All floors")
+else:
+    fc1, fc2 = st.columns([1, 1])
+    util_choice = fc1.radio(
+        "Utility", ["Both", "Electricity", "Gas"], horizontal=True, key="inst_util"
+    )
+    floor_choice = fc2.multiselect("Floor", FLOOR_ORDER, default=[], placeholder="All floors")
 
 out = master[~master["amr_active"]].copy()
 if util_choice == "Electricity":
